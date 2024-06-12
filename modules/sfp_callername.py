@@ -9,9 +9,9 @@
 # Copyright:   (c) bcoles 2019
 # Licence:     MIT
 # -------------------------------------------------------------------------------
-
 import re
 import time
+import requests
 
 from spiderfoot import SpiderFootEvent, SpiderFootPlugin
 
@@ -32,7 +32,7 @@ class sfp_callername(SpiderFootPlugin):
                 "https://callername.com/stats"
             ],
             'favIcon': "http://static.callername.com/favicon.ico",
-            'logo': "http://static.callername.com/img/logo.min.png",
+            'logo': "http://callername.com/img/logo.min.png",
             'description': "CallerName is a free, reverse phone lookup service for both cell and landline numbers. "
             "It relies on a database of white pages and business pages taken from public sources. "
             "The easy-to-use and streamlined interface allow users to look up the caller ID information of any number quickly. "
@@ -90,30 +90,30 @@ class sfp_callername(SpiderFootPlugin):
             return
 
         # Strip country code (+1) and formatting
-        number = eventData.lstrip('+1').strip('(').strip(')').strip('-').strip(' ')
+        number = eventData.lstrip('+1').replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
 
         if not number.isdigit():
             self.debug('Invalid phone number: ' + number)
             return
 
-        # Query CallerName.com for the specified phone number
-        url = f"https://callername.com/{number}"
-        res = self.sf.fetchUrl(url, timeout=self.opts['_fetchtimeout'], useragent=self.opts['_useragent'])
+        # Query CallerName.com/phone* for the specified phone number
+        url = f"https://callername.com/phone/{number}"
+        res = requests.get(url, timeout=30)
 
         time.sleep(1)
 
-        if res['content'] is None:
+        if res.content is None:
             self.debug('No response from CallerName.com')
             return
 
-        if res['code'] != '200':
-            self.debug('No phone information found for ' + eventData)
+        if res.status_code != 200:
+            self.debug(f'No phone information found for {eventData} (HTTP Status: {res.status_code})')
             return
 
-        location_match = re.findall(r'<div class="callerid"><h4>.*?</h4><p>(.+?)</p></div>', str(res['content']), re.MULTILINE | re.DOTALL)
+        location_match = re.findall(r'<div class="callerid"><h4>.*?</h4><p>(.+?)</p></div>', str(res.content), re.MULTILINE | re.DOTALL)
 
         if location_match:
-            location = location_match[0]
+            location = location_match[0].strip()
 
             if len(location) < 5 or len(location) > 100:
                 self.debug("Skipping likely invalid location.")
@@ -121,8 +121,8 @@ class sfp_callername(SpiderFootPlugin):
                 evt = SpiderFootEvent('GEOINFO', location, self.__name__, event)
                 self.notifyListeners(evt)
 
-        rep_good_match = re.findall(r'>SAFE.*?>(\d+) votes?<', str(res['content']))
-        rep_bad_match = re.findall(r'>UNSAFE.*?>(\d+) votes?<', str(res['content']))
+        rep_good_match = re.findall(r'>SAFE.*?>(\d+) votes?<', str(res.content))
+        rep_bad_match = re.findall(r'>UNSAFE.*?>(\d+) votes?<', str(res.content))
 
         if rep_good_match and rep_bad_match:
             good_votes = int(rep_good_match[0])
@@ -134,3 +134,4 @@ class sfp_callername(SpiderFootPlugin):
                 self.notifyListeners(evt)
 
 # End of sfp_callername class
+
